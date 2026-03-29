@@ -1,0 +1,533 @@
+openapi: 3.0.3
+
+info:
+  title: InventaPyme API
+  version: 1.0.0
+  description: >
+    InventaPyme es una aplicación web de gestión de inventario para pequeñas y
+    medianas empresas. Permite registrar productos, controlar entradas y salidas
+    de stock y detectar productos con nivel bajo de inventario.
+
+
+    **Autenticación:** el sistema usa sesiones con cookies firmadas por Flask.
+    No se utilizan tokens JWT. Para acceder a los endpoints protegidos el cliente
+    debe haber iniciado sesión previamente mediante `POST /login`.
+
+
+    **Respuestas:** todos los endpoints devuelven redirecciones HTTP 302 (patrón
+    Post/Redirect/Get). Los mensajes de éxito o error se comunican mediante
+    flash messages en la siguiente página renderizada.
+
+  contact:
+    name: Equipo InventaPyme
+  license:
+    name: MIT
+
+servers:
+  - url: http://127.0.0.1:5000
+    description: Servidor de desarrollo local
+
+tags:
+  - name: Autenticación
+    description: Registro, login y logout de usuarios
+  - name: Panel
+    description: Dashboard principal del usuario autenticado
+  - name: Negocios
+    description: Creación y acceso al negocio del usuario
+  - name: Productos
+    description: CRUD de productos del inventario
+  - name: Stock
+    description: Movimientos de entrada y salida de stock
+
+paths:
+
+  /:
+    get:
+      tags: [Autenticación]
+      summary: Redirección inicial
+      description: Redirige al login si no hay sesión activa, o al inventario si la hay.
+      responses:
+        "302":
+          description: Redirección al login o al inventario
+          headers:
+            Location:
+              schema:
+                type: string
+              example: /login
+
+  /registro:
+    get:
+      tags: [Autenticación]
+      summary: Mostrar formulario de registro
+      responses:
+        "200":
+          description: Página HTML con el formulario de registro
+          content:
+            text/html:
+              schema:
+                type: string
+        "302":
+          description: Redirige al dashboard si ya hay sesión activa
+    post:
+      tags: [Autenticación]
+      summary: Crear cuenta de usuario
+      description: Crea un nuevo usuario. El nombre de usuario debe ser único.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/RegistroForm"
+      responses:
+        "302":
+          description: Registro exitoso — redirige al login
+          headers:
+            Location:
+              schema:
+                type: string
+              example: /login
+        "200":
+          description: Error de validación — vuelve al formulario con mensaje de error
+          content:
+            text/html:
+              schema:
+                type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /login:
+    get:
+      tags: [Autenticación]
+      summary: Mostrar formulario de login
+      responses:
+        "200":
+          description: Página HTML con el formulario de login
+          content:
+            text/html:
+              schema:
+                type: string
+        "302":
+          description: Redirige al dashboard si ya hay sesión activa
+    post:
+      tags: [Autenticación]
+      summary: Iniciar sesión
+      description: Autentica al usuario y crea una sesión con cookie firmada.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/LoginForm"
+      responses:
+        "302":
+          description: Login exitoso — redirige al inventario o al dashboard
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+              example: session=<cookie_firmada>; HttpOnly; Path=/
+            Location:
+              schema:
+                type: string
+              example: /panel/negocios/1
+        "200":
+          description: Credenciales incorrectas — vuelve al formulario con mensaje de error
+          content:
+            text/html:
+              schema:
+                type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /logout:
+    get:
+      tags: [Autenticación]
+      summary: Cerrar sesión
+      description: Destruye la sesión activa y redirige al login.
+      security:
+        - cookieAuth: []
+      responses:
+        "302":
+          description: Sesión cerrada — redirige al login
+          headers:
+            Location:
+              schema:
+                type: string
+              example: /login
+
+  /panel:
+    get:
+      tags: [Panel]
+      summary: Dashboard principal
+      description: Muestra la lista de negocios del usuario y el formulario para crear uno nuevo.
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Página HTML del dashboard
+          content:
+            text/html:
+              schema:
+                type: string
+        "302":
+          description: Redirige al login si no hay sesión activa
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /panel/negocios:
+    post:
+      tags: [Negocios]
+      summary: Crear negocio
+      description: Crea el negocio del usuario. Solo se permite 1 negocio por cuenta.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/NegocioForm"
+      responses:
+        "302":
+          description: Negocio creado — redirige al inventario
+          headers:
+            Location:
+              schema:
+                type: string
+              example: /panel/negocios/1
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /panel/negocios/{negocio_id}:
+    get:
+      tags: [Negocios]
+      summary: Ver inventario del negocio
+      description: Muestra la lista de productos. Acepta búsqueda por nombre o código.
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/negocioId"
+        - name: q
+          in: query
+          required: false
+          description: Término de búsqueda por nombre o código de producto
+          schema:
+            type: string
+          example: tornillo
+      responses:
+        "200":
+          description: Página HTML del inventario con lista de productos
+          content:
+            text/html:
+              schema:
+                type: string
+        "302":
+          description: Redirige al dashboard si el negocio no pertenece al usuario
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /panel/negocios/{negocio_id}/productos:
+    post:
+      tags: [Productos]
+      summary: Agregar producto
+      description: Agrega un nuevo producto al inventario. El nombre debe ser único por negocio.
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/negocioId"
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/ProductoForm"
+      responses:
+        "302":
+          description: Producto agregado — redirige al inventario
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /panel/negocios/{negocio_id}/productos/{producto_id}/editar:
+    post:
+      tags: [Productos]
+      summary: Editar producto
+      description: Actualiza nombre, código, cantidad y stock mínimo de un producto.
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/negocioId"
+        - $ref: "#/components/parameters/productoId"
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/ProductoForm"
+      responses:
+        "302":
+          description: Producto actualizado — redirige al inventario
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /panel/negocios/{negocio_id}/productos/{producto_id}/eliminar:
+    post:
+      tags: [Productos]
+      summary: Eliminar producto
+      description: Elimina un producto del inventario del negocio.
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/negocioId"
+        - $ref: "#/components/parameters/productoId"
+      responses:
+        "302":
+          description: Producto eliminado — redirige al inventario
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /panel/negocios/{negocio_id}/productos/{producto_id}/ingresar:
+    post:
+      tags: [Stock]
+      summary: Ingresar unidades al stock
+      description: Suma la cantidad indicada al stock actual del producto. Debe ser mayor que cero.
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/negocioId"
+        - $ref: "#/components/parameters/productoId"
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/EntradaForm"
+      responses:
+        "302":
+          description: Stock actualizado — redirige al inventario
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /panel/negocios/{negocio_id}/productos/{producto_id}/despachar:
+    post:
+      tags: [Stock]
+      summary: Despachar unidades del stock
+      description: Resta la cantidad indicada del stock. No se puede despachar más de lo disponible.
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/negocioId"
+        - $ref: "#/components/parameters/productoId"
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/SalidaForm"
+      responses:
+        "302":
+          description: Stock actualizado — redirige al inventario
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+components:
+
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: session
+      description: Sesión gestionada por Flask mediante cookie firmada con HMAC-SHA1.
+
+  parameters:
+    negocioId:
+      name: negocio_id
+      in: path
+      required: true
+      description: ID del negocio
+      schema:
+        type: integer
+        example: 1
+
+    productoId:
+      name: producto_id
+      in: path
+      required: true
+      description: ID del producto
+      schema:
+        type: integer
+        example: 5
+
+  schemas:
+
+    RegistroForm:
+      type: object
+      required: [username, password, nombre]
+      properties:
+        username:
+          type: string
+          description: Nombre de usuario único
+          example: jose123
+        password:
+          type: string
+          format: password
+          description: Contraseña del usuario
+          example: miContrasena456
+        nombre:
+          type: string
+          description: Nombre real del usuario
+          example: José García
+
+    LoginForm:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          example: jose123
+        password:
+          type: string
+          format: password
+          example: miContrasena456
+
+    NegocioForm:
+      type: object
+      required: [nombre]
+      properties:
+        nombre:
+          type: string
+          description: Nombre del negocio
+          example: Ferretería El Clavo
+
+    ProductoForm:
+      type: object
+      required: [nombre, cantidad, stock_minimo]
+      properties:
+        nombre:
+          type: string
+          description: Nombre del producto (único por negocio)
+          example: Tornillo 1/2 pulgada
+        codigo:
+          type: string
+          description: Código interno del producto (opcional)
+          example: TRN-001
+        cantidad:
+          type: integer
+          minimum: 0
+          description: Cantidad en stock
+          example: 100
+        stock_minimo:
+          type: integer
+          minimum: 0
+          description: Nivel mínimo antes de reabastecimiento
+          example: 10
+
+    EntradaForm:
+      type: object
+      required: [entrada]
+      properties:
+        entrada:
+          type: integer
+          minimum: 1
+          description: Unidades a ingresar al stock
+          example: 50
+
+    SalidaForm:
+      type: object
+      required: [salida]
+      properties:
+        salida:
+          type: integer
+          minimum: 1
+          description: Unidades a despachar del stock
+          example: 10
+
+  responses:
+
+    BadRequest:
+      description: >
+        400 — Solicitud inválida. Campos faltantes, vacíos o con formato
+        incorrecto (por ejemplo, cantidad no numérica).
+      content:
+        text/html:
+          schema:
+            type: string
+          example: "Cantidad y stock mínimo deben ser números enteros."
+
+    Unauthorized:
+      description: >
+        401 — No autenticado. El usuario no tiene sesión activa.
+        El sistema redirige automáticamente a /login.
+      content:
+        text/html:
+          schema:
+            type: string
+          example: "Inicia sesión para continuar."
+
+    NotFound:
+      description: >
+        404 — Recurso no encontrado. El negocio o producto no existe
+        o no pertenece al usuario autenticado.
+      content:
+        text/html:
+          schema:
+            type: string
+          example: "Negocio no encontrado."
+
+    Conflict:
+      description: >
+        409 — Conflicto. El recurso ya existe: nombre de usuario duplicado,
+        negocio ya creado, o nombre de producto repetido en el mismo negocio.
+      content:
+        text/html:
+          schema:
+            type: string
+          example: "Ya existe un producto con ese nombre en tu inventario."
+
+    UnprocessableEntity:
+      description: >
+        422 — No procesable. La operación es válida en formato pero no puede
+        ejecutarse: por ejemplo, despachar más unidades que el stock disponible.
+      content:
+        text/html:
+          schema:
+            type: string
+          example: "No hay suficiente stock. Disponible: 5."
+```
+
+---
+
+Luego baja hasta **"Commit changes..."**, escribe el mensaje:
+```
+docs: agregar especificación OpenAPI
